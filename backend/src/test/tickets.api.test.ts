@@ -3,27 +3,15 @@ import request from "supertest";
 import type { Pool } from "pg";
 import { createApp } from "../app.js";
 import { createPool } from "../db/pool.js";
+import { TEST_DATABASE_URL } from "./database.js";
 
 describe("Tickets API", () => {
   let pool: Pool;
   let app: ReturnType<typeof createApp>;
 
-  beforeAll(async () => {
-    pool = createPool();
+  beforeAll(() => {
+    pool = createPool(TEST_DATABASE_URL);
     app = createApp(pool);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tickets (
-        id SERIAL PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT,
-        status TEXT NOT NULL DEFAULT 'open'
-          CHECK (status IN ('open', 'in_progress', 'closed')),
-        priority TEXT NOT NULL DEFAULT 'medium'
-          CHECK (priority IN ('low', 'medium', 'high')),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-    `);
   });
 
   beforeEach(async () => {
@@ -50,11 +38,30 @@ describe("Tickets API", () => {
     expect(res.body.created_at).toBeTruthy();
   });
 
+  it("stores a blank description as null", async () => {
+    const res = await request(app)
+      .post("/tickets")
+      .send({ title: "No details", description: "   " })
+      .expect(201);
+
+    expect(res.body.description).toBeNull();
+  });
+
   it("rejects create when title is missing", async () => {
     const res = await request(app).post("/tickets").send({}).expect(400);
 
     expect(res.body.error).toBe("Validation failed");
     expect(res.body.details.length).toBeGreaterThan(0);
+  });
+
+  it("rejects malformed JSON with a 400", async () => {
+    const res = await request(app)
+      .post("/tickets")
+      .set("Content-Type", "application/json")
+      .send("{bad")
+      .expect(400);
+
+    expect(res.body.error).toBe("Malformed JSON body");
   });
 
   it("filters by status and paginates", async () => {
@@ -77,6 +84,14 @@ describe("Tickets API", () => {
     expect(filtered.body.data).toHaveLength(1);
     expect(filtered.body.total_pages).toBe(2);
     expect(filtered.body.data[0].status).toBe("open");
+  });
+
+  it("falls back to defaults when query values are empty", async () => {
+    const res = await request(app)
+      .get("/tickets?status=&page=&limit=")
+      .expect(200);
+
+    expect(res.body).toMatchObject({ page: 1, limit: 20 });
   });
 
   it("updates status and returns stats for all statuses including zeros", async () => {
@@ -104,6 +119,20 @@ describe("Tickets API", () => {
     });
   });
 
+  it("updates priority on its own", async () => {
+    const created = await request(app)
+      .post("/tickets")
+      .send({ title: "Reprioritise" })
+      .expect(201);
+
+    const res = await request(app)
+      .patch(`/tickets/${created.body.id}`)
+      .send({ priority: "low" })
+      .expect(200);
+
+    expect(res.body).toMatchObject({ status: "open", priority: "low" });
+  });
+
   it("returns 404 when patching a missing ticket", async () => {
     const res = await request(app)
       .patch("/tickets/999")
@@ -111,5 +140,23 @@ describe("Tickets API", () => {
       .expect(404);
 
     expect(res.body.error).toBe("Ticket not found");
+  });
+
+  it("rejects ids beyond the integer range instead of erroring", async () => {
+    const res = await request(app)
+      .patch("/tickets/99999999999")
+      .send({ status: "closed" })
+      .expect(400);
+
+    expect(res.body.details[0]).toMatchObject({
+      path: "id",
+      message: "id is out of range",
+    });
+  });
+
+  it("returns JSON for unknown routes", async () => {
+    const res = await request(app).delete("/tickets/1").expect(404);
+
+    expect(res.body).toEqual({ error: "Not found" });
   });
 });
