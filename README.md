@@ -4,27 +4,27 @@ Small support-ticket app for the Lodwar Services take-home: Express + PostgreSQL
 
 ## Stack
 
-- Backend: Node.js, Express, TypeScript, Zod, `pg`
+- Backend: Node.js, Express 5, TypeScript, Zod, `pg`
 - Database: PostgreSQL 16 (Docker Compose)
-- Frontend: React + Vite
-- Tests: Vitest + Supertest
+- Frontend: React 19 + Vite
+- Tests: Vitest + Supertest against a real Postgres database
 
 ## Prerequisites
 
 - Node.js 20+
 - Docker (for Postgres)
 
-Local Postgres already bound to `5432` is fine — Compose publishes the app DB on **5433**.
+Compose publishes the app database on **5433**, so a local Postgres already on `5432` doesn't get in the way.
 
 ## Setup
 
 ```bash
-# 1. Start Postgres
-docker compose up -d
+# 1. Start Postgres and wait until it is healthy
+docker compose up -d --wait
 
 # 2. Backend
 cd backend
-cp ../.env.example .env   # if needed
+cp .env.example .env
 npm install
 npm run migrate
 npm run dev               # http://localhost:3001
@@ -35,35 +35,56 @@ npm install
 npm run dev               # http://localhost:5173
 ```
 
-Vite proxies `/tickets` and `/health` to the API.
+Vite proxies `/tickets` and `/health` to the API, so the UI needs no extra config.
 
 ## API
 
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/tickets` | Create (`title` required; `description`, `status`, `priority` optional) |
-| `GET` | `/tickets` | List with `?status=` and `?page=&limit=` (default page 1, limit 20, max 100) |
-| `PATCH` | `/tickets/:id` | Update `status` and/or `priority` |
+| `POST` | `/tickets` | Create. `title` required; `description`, `status`, `priority` optional |
+| `GET` | `/tickets` | List with `?status=` and `?page=&limit=` (defaults page 1, limit 20, max 100) |
+| `PATCH` | `/tickets/:id` | Update `status` and/or `priority`; `404` if the ticket doesn't exist |
 | `GET` | `/tickets/stats` | Counts for `open`, `in_progress`, `closed` (zeros included) |
 
-Defaults on create: `status=open`, `priority=medium`.
+Defaults on create: `status=open`, `priority=medium`. A blank description is stored as `null`.
 
-## Tests
+Errors are always JSON: `400` with `{ error, details[] }` for validation and malformed JSON bodies, `404 { error }` for missing tickets or unknown routes, `500` for anything unexpected.
+
+Example:
+
+```bash
+curl -X POST localhost:3001/tickets -H 'content-type: application/json' \
+  -d '{"title":"Printer jam","priority":"high"}'
+curl 'localhost:3001/tickets?status=open&page=1&limit=10'
+curl -X PATCH localhost:3001/tickets/1 -H 'content-type: application/json' \
+  -d '{"status":"in_progress"}'
+curl localhost:3001/tickets/stats
+```
+
+## Tests and checks
 
 ```bash
 cd backend
-npm test
+npm test            # integration tests
+npm run typecheck   # tsc over src and tests
+
+cd ../frontend
+npm run build       # type-checks and bundles
+npm run lint
 ```
 
-Integration tests cover create, validation failure, list filter/pagination, stats (including zeros), and 404 on patch.
+Tests run against a separate `tickets_test` database that is created automatically on first run, so `npm test` never touches the data behind the dev server. Set `TEST_DATABASE_URL` to point somewhere else.
+
+The suite covers: create with defaults, blank description → `null`, missing title, malformed JSON, status filter + pagination, empty query values falling back to defaults, status update + stats with zeros, priority-only update, `404` on a missing ticket, out-of-range ids, and JSON `404`s for unknown routes.
 
 ## Assumptions
 
-- Integer IDs (`SERIAL`) instead of UUIDs.
-- List responses are paginated envelopes (`data`, `page`, `limit`, `total`, `total_pages`).
-- `GET /tickets/stats` is registered before `/:id` routes so `stats` is never parsed as an id.
-- No auth — out of scope for the assignment window.
+- Integer IDs (`SERIAL`) rather than UUIDs; simpler to read while debugging.
+- List responses are paginated envelopes: `data`, `page`, `limit`, `total`, `total_pages`.
+- The UI pages 10 tickets at a time and keeps the list visible while the next page loads.
+- `GET /tickets/stats` is registered before `/:id` so `stats` is never parsed as an id.
+- No auth; out of scope for the assignment window.
 
 ## Decisions & Tradeoffs
 
-I chose Express + TypeScript + Zod because I can ship typed validation and clear error shapes quickly without an ORM. Raw SQL with a small repository layer keeps the schema obvious and easy to explain in an interview. Postgres runs in Docker on port 5433 so it does not collide with a local Postgres install. The UI is a single Vite React page that covers the three required interactions and shows stats as a light readout; I skipped routing, auth, and design-system polish on purpose. Tests hit a real database rather than mocks so pagination, filters, and stats reflect actual SQL behavior. With more time I would add migrations tooling (e.g. node-pg-migrate), auth, optimistic UI updates, and tighter OpenAPI docs — none of that was worth the risk of over-building for a 3–4 hour exercise.
+I went with Express + TypeScript + Zod because it let me ship typed validation and predictable error shapes quickly without pulling in an ORM. Raw SQL behind a small repository module keeps the schema obvious and easy to walk through in an interview. The schema lives in one `CREATE TABLE IF NOT EXISTS` script shared by the migrate command and the test setup; a real project would use a migration tool with versioned files. Postgres runs in Docker on 5433 so it doesn't collide with a local install. The tests hit a real database rather than mocks because pagination, filters, and the stats grouping are exactly the places where SQL behaviour matters, and they use their own database so running them never wipes dev data. The UI is a single React page covering the three required interactions plus a stats readout and simple pagination; I skipped routing, auth, optimistic updates, and design-system polish on purpose. With more time I'd add versioned migrations, an OpenAPI spec, a `updated_at` column, and component tests for the form and status change.
