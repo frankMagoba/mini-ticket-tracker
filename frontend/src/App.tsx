@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import {
   createTicket,
@@ -17,59 +17,100 @@ import "./App.css";
 const STATUSES: TicketStatus[] = ["open", "in_progress", "closed"];
 const PRIORITIES: TicketPriority[] = ["low", "medium", "high"];
 
+interface Board {
+  tickets: Ticket[];
+  stats: TicketStats;
+  total: number;
+  totalPages: number;
+}
+
+async function loadBoard(
+  page: number,
+  status?: TicketStatus,
+): Promise<Board> {
+  const [list, stats] = await Promise.all([
+    listTickets(page, status),
+    getStats(),
+  ]);
+
+  return {
+    tickets: list.data,
+    stats,
+    total: list.total,
+    totalPages: list.total_pages,
+  };
+}
+
 function formatStatus(status: TicketStatus): string {
   return status.replace("_", " ");
 }
 
+function describeError(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
+interface LoadResult {
+  key: string;
+  board: Board | null;
+  error: string | null;
+}
+
 export default function App() {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [stats, setStats] = useState<TicketStats | null>(null);
   const [filter, setFilter] = useState<TicketStatus | "">("");
+  const [page, setPage] = useState(1);
+  const [reloadCount, setReloadCount] = useState(0);
+  const [result, setResult] = useState<LoadResult | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TicketPriority>("medium");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
 
-  const refresh = useCallback(async () => {
-    setError(null);
-    const [list, nextStats] = await Promise.all([
-      listTickets(filter || undefined),
-      getStats(),
-    ]);
-    setTickets(list.data);
-    setStats(nextStats);
-  }, [filter]);
+  // A response only counts if it matches the request currently wanted,
+  // so a slow earlier fetch can never overwrite a newer one.
+  const requestKey = `${filter}|${page}|${reloadCount}`;
+  const loading = result?.key !== requestKey;
+  const board = result?.board ?? null;
+  const error = actionError ?? result?.error ?? null;
+
+  const reload = () => setReloadCount((count) => count + 1);
 
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
-      try {
-        setLoading(true);
-        await refresh();
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load tickets");
+    loadBoard(page, filter || undefined)
+      .then((next) => {
+        if (cancelled) return;
+        setResult({ key: requestKey, board: next, error: null });
+        // Moving the last ticket off a page leaves it empty; step back.
+        if (next.tickets.length === 0 && page > 1) {
+          setPage(Math.max(1, next.totalPages));
         }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setResult((previous) => ({
+          key: requestKey,
+          board: previous?.board ?? null,
+          error: describeError(err, "Failed to load tickets"),
+        }));
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
+  }, [filter, page, reloadCount, requestKey]);
+
+  function onFilterChange(next: TicketStatus | "") {
+    setFilter(next);
+    setPage(1);
+  }
 
   async function onCreate(event: FormEvent) {
     event.preventDefault();
     setSubmitting(true);
-    setError(null);
+    setActionError(null);
 
     try {
       await createTicket({
@@ -80,9 +121,10 @@ export default function App() {
       setTitle("");
       setDescription("");
       setPriority("medium");
-      await refresh();
+      setPage(1);
+      reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create ticket");
+      setActionError(describeError(err, "Failed to create ticket"));
     } finally {
       setSubmitting(false);
     }
@@ -90,17 +132,20 @@ export default function App() {
 
   async function onStatusChange(id: number, status: TicketStatus) {
     setUpdatingId(id);
-    setError(null);
+    setActionError(null);
 
     try {
       await updateTicketStatus(id, status);
-      await refresh();
+      reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update ticket");
+      setActionError(describeError(err, "Failed to update ticket"));
     } finally {
       setUpdatingId(null);
     }
   }
+
+  const tickets = board?.tickets ?? [];
+  const totalPages = board?.totalPages ?? 0;
 
   return (
     <div className="page">
@@ -109,25 +154,29 @@ export default function App() {
           <h1>Mini Ticket Tracker</h1>
           <p>Create tickets, filter by status, and move work forward.</p>
         </div>
-        {stats && (
+        {board && (
           <dl className="stats">
             <div>
               <dt>Open</dt>
-              <dd>{stats.open}</dd>
+              <dd>{board.stats.open}</dd>
             </div>
             <div>
               <dt>In progress</dt>
-              <dd>{stats.in_progress}</dd>
+              <dd>{board.stats.in_progress}</dd>
             </div>
             <div>
               <dt>Closed</dt>
-              <dd>{stats.closed}</dd>
+              <dd>{board.stats.closed}</dd>
             </div>
           </dl>
         )}
       </header>
 
-      {error && <div className="banner error">{error}</div>}
+      {error && (
+        <div className="banner error" role="alert">
+          {error}
+        </div>
+      )}
 
       <section className="panel">
         <h2>New ticket</h2>
@@ -173,12 +222,17 @@ export default function App() {
 
       <section className="panel">
         <div className="list-header">
-          <h2>Tickets</h2>
+          <h2>
+            Tickets
+            {board && <span className="count">{board.total}</span>}
+          </h2>
           <label className="filter">
             Status
             <select
               value={filter}
-              onChange={(e) => setFilter(e.target.value as TicketStatus | "")}
+              onChange={(e) =>
+                onFilterChange(e.target.value as TicketStatus | "")
+              }
             >
               <option value="">All</option>
               {STATUSES.map((value) => (
@@ -190,12 +244,12 @@ export default function App() {
           </label>
         </div>
 
-        {loading ? (
-          <p className="muted">Loading tickets…</p>
+        {board === null ? (
+          loading && <p className="muted">Loading tickets…</p>
         ) : tickets.length === 0 ? (
           <p className="muted">No tickets yet.</p>
         ) : (
-          <ul className="ticket-list">
+          <ul className="ticket-list" aria-busy={loading}>
             {tickets.map((ticket) => (
               <li key={ticket.id} className="ticket">
                 <div className="ticket-main">
@@ -231,6 +285,30 @@ export default function App() {
               </li>
             ))}
           </ul>
+        )}
+
+        {totalPages > 1 && (
+          <nav className="pagination" aria-label="Ticket pages">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setPage((current) => current - 1)}
+              disabled={loading || page <= 1}
+            >
+              Previous
+            </button>
+            <span>
+              Page {page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setPage((current) => current + 1)}
+              disabled={loading || page >= totalPages}
+            >
+              Next
+            </button>
+          </nav>
         )}
       </section>
     </div>

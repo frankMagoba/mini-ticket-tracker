@@ -125,6 +125,42 @@ button:disabled {
 
 .list-header h2 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: #eef2f6;
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+}
+
+.ticket-list[aria-busy="true"] {
+  opacity: 0.6;
+  transition: opacity 120ms ease;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+button.secondary {
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  font-weight: 600;
 }
 
 .filter,
