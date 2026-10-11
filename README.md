@@ -1,6 +1,6 @@
 # Mini Ticket Tracker
 
-Take-home for Lodwar Services: ticket API on Express + Postgres, thin React UI.
+Ticket API on Express + Postgres, with a thin React UI.
 
 ## Stack
 
