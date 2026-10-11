@@ -1,29 +1,15 @@
-import { pool } from "./pool.js";
+import "dotenv/config";
+import { createPool } from "./pool.js";
+import { SCHEMA_SQL } from "./schema.js";
 
-const SQL = `
-CREATE TABLE IF NOT EXISTS tickets (
-  id SERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  status TEXT NOT NULL DEFAULT 'open'
-    CHECK (status IN ('open', 'in_progress', 'closed')),
-  priority TEXT NOT NULL DEFAULT 'medium'
-    CHECK (priority IN ('low', 'medium', 'high')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+const pool = createPool();
 
-CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);
-CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets (created_at DESC);
-`;
-
-async function migrate(): Promise<void> {
-  await pool.query(SQL);
+try {
+  await pool.query(SCHEMA_SQL);
   console.log("Migrations applied.");
+} catch (err) {
+  console.error("Migration failed:", err);
+  process.exitCode = 1;
+} finally {
   await pool.end();
 }
-
-migrate().catch(async (err) => {
-  console.error("Migration failed:", err);
-  await pool.end();
-  process.exit(1);
-});
