@@ -15,6 +15,11 @@ export function createApp(db: Pool) {
   });
 
   app.use("/tickets", createTicketsRouter(db));
+
+  app.use((_req, res) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
   app.use(errorHandler);
 
   return app;
