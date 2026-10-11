@@ -1,56 +1,54 @@
 # Mini Ticket Tracker
 
-Small support-ticket app for the Lodwar Services take-home: Express + PostgreSQL API and a React UI.
+Take-home for Lodwar Services: ticket API on Express + Postgres, thin React UI.
 
 ## Stack
 
 - Backend: Node.js, Express 5, TypeScript, Zod, `pg`
 - Database: PostgreSQL 16 (Docker Compose)
 - Frontend: React 19 + Vite
-- Tests: Vitest + Supertest against a real Postgres database
+- Tests: Vitest + Supertest on a real Postgres database
 
 ## Prerequisites
 
 - Node.js 20+
 - Docker (for Postgres)
 
-Compose publishes the app database on **5433**, so a local Postgres already on `5432` doesn't get in the way.
+The Compose file maps Postgres to host port **5433**. That way a local Postgres on `5432` can stay running.
 
 ## Setup
 
 ```bash
-# 1. Start Postgres and wait until it is healthy
+# start db
 docker compose up -d --wait
 
-# 2. Backend
+# API
 cd backend
 cp .env.example .env
 npm install
 npm run migrate
 npm run dev               # http://localhost:3001
 
-# 3. Frontend (new terminal)
+# UI (second terminal)
 cd frontend
 npm install
 npm run dev               # http://localhost:5173
 ```
 
-Vite proxies `/tickets` and `/health` to the API, so the UI needs no extra config.
+Vite proxies `/tickets` and `/health` to the API. No CORS config needed for local work.
 
 ## API
 
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/tickets` | Create. `title` required; `description`, `status`, `priority` optional |
-| `GET` | `/tickets` | List with `?status=` and `?page=&limit=` (defaults page 1, limit 20, max 100) |
-| `PATCH` | `/tickets/:id` | Update `status` and/or `priority`; `404` if the ticket doesn't exist |
-| `GET` | `/tickets/stats` | Counts for `open`, `in_progress`, `closed` (zeros included) |
+| `GET` | `/tickets` | List. `?status=`, `?page=`, `?limit=` (default page 1, limit 20, max 100) |
+| `PATCH` | `/tickets/:id` | Update `status` and/or `priority`. Missing id → `404` |
+| `GET` | `/tickets/stats` | Counts for `open`, `in_progress`, `closed` (includes zeros) |
 
-Defaults on create: `status=open`, `priority=medium`. A blank description is stored as `null`.
+Create defaults: `status=open`, `priority=medium`. Blank description becomes `null`.
 
-Errors are always JSON: `400` with `{ error, details[] }` for validation and malformed JSON bodies, `404 { error }` for missing tickets or unknown routes, `500` for anything unexpected.
-
-Example:
+Error bodies are JSON. Validation and bad JSON → `400` with `{ error, details? }`. Missing ticket or unknown path → `404 { error }`. Unexpected failures → `500`.
 
 ```bash
 curl -X POST localhost:3001/tickets -H 'content-type: application/json' \
@@ -65,26 +63,38 @@ curl localhost:3001/tickets/stats
 
 ```bash
 cd backend
-npm test            # integration tests
-npm run typecheck   # tsc over src and tests
+npm test
+npm run typecheck
 
 cd ../frontend
-npm run build       # type-checks and bundles
+npm run build
 npm run lint
 ```
 
-Tests run against a separate `tickets_test` database that is created automatically on first run, so `npm test` never touches the data behind the dev server. Set `TEST_DATABASE_URL` to point somewhere else.
+`npm test` talks to a `tickets_test` database (created on first run). It truncates that DB between cases, not the one your `npm run dev` uses. Override with `TEST_DATABASE_URL` if you want.
 
-The suite covers: create with defaults, blank description → `null`, missing title, malformed JSON, status filter + pagination, empty query values falling back to defaults, status update + stats with zeros, priority-only update, `404` on a missing ticket, out-of-range ids, and JSON `404`s for unknown routes.
+Covers create/defaults, blank description → `null`, validation failures, filter + pagination, stats zeros, priority-only patch, missing/`out-of-range` ids, and JSON 404s.
 
 ## Assumptions
 
-- Integer IDs (`SERIAL`) rather than UUIDs; simpler to read while debugging.
-- List responses are paginated envelopes: `data`, `page`, `limit`, `total`, `total_pages`.
-- The UI pages 10 tickets at a time and keeps the list visible while the next page loads.
-- `GET /tickets/stats` is registered before `/:id` so `stats` is never parsed as an id.
-- No auth; out of scope for the assignment window.
+- Integer `SERIAL` ids (not UUIDs).
+- List payload shape: `{ data, page, limit, total, total_pages }`.
+- UI shows 10 tickets per page.
+- `/tickets/stats` is mounted before any `/:id` route.
+- No auth.
 
 ## Decisions & Tradeoffs
 
-I went with Express + TypeScript + Zod because it let me ship typed validation and predictable error shapes quickly without pulling in an ORM. Raw SQL behind a small repository module keeps the schema obvious and easy to walk through in an interview. The schema lives in one `CREATE TABLE IF NOT EXISTS` script shared by the migrate command and the test setup; a real project would use a migration tool with versioned files. Postgres runs in Docker on 5433 so it doesn't collide with a local install. The tests hit a real database rather than mocks because pagination, filters, and the stats grouping are exactly the places where SQL behaviour matters, and they use their own database so running them never wipes dev data. The UI is a single React page covering the three required interactions plus a stats readout and simple pagination; I skipped routing, auth, optimistic updates, and design-system polish on purpose. With more time I'd add versioned migrations, an OpenAPI spec, a `updated_at` column, and component tests for the form and status change.
+Picked Express with TypeScript + Zod. Four endpoints don't need an ORM, and I wanted typed 400s without much ceremony.
+
+DB layer is plain SQL in a small module. Fine to read in review; a query builder would mostly get in the way here.
+
+Schema is one `CREATE TABLE IF NOT EXISTS` shared by `npm run migrate` and the test setup. That's a shortcut. A longer-lived app would get versioned migrations.
+
+Postgres runs in Docker on 5433 so it doesn't fight whatever's already on 5432.
+
+Tests hit real Postgres (`tickets_test`) instead of mocks. I care about the filter SQL and the stats `GROUP BY` more than about a mock matching my own stubs. Separate DB means `npm test` doesn't wipe whatever you created in the UI.
+
+UI is one React page: create, list, change status, stats, basic paging. No auth or router. No design system either — not the point of the brief.
+
+Given more time I'd add versioned migrations, OpenAPI, and an `updated_at` column. Maybe a couple of component tests around the form.

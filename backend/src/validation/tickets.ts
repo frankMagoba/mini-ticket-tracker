@@ -3,7 +3,7 @@ import { TICKET_PRIORITIES, TICKET_STATUSES } from "../types/ticket.js";
 
 const PG_INT_MAX = 2_147_483_647;
 
-// Query strings arrive as "" when a key is present without a value.
+// ?page= shows up as ""
 const emptyToUndefined = (value: unknown) => (value === "" ? undefined : value);
 
 export const createTicketSchema = z.object({

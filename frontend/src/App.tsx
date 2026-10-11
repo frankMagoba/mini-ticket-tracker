@@ -67,8 +67,7 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
 
-  // A response only counts if it matches the request currently wanted,
-  // so a slow earlier fetch can never overwrite a newer one.
+  // drop responses that don't match the latest request
   const requestKey = `${filter}|${page}|${reloadCount}`;
   const loading = result?.key !== requestKey;
   const board = result?.board ?? null;
@@ -83,7 +82,7 @@ export default function App() {
       .then((next) => {
         if (cancelled) return;
         setResult({ key: requestKey, board: next, error: null });
-        // Moving the last ticket off a page leaves it empty; step back.
+        // last item left this page — go back
         if (next.tickets.length === 0 && page > 1) {
           setPage(Math.max(1, next.totalPages));
         }
@@ -152,7 +151,7 @@ export default function App() {
       <header className="header">
         <div>
           <h1>Mini Ticket Tracker</h1>
-          <p>Create tickets, filter by status, and move work forward.</p>
+          <p>Create, list, and update ticket status.</p>
         </div>
         {board && (
           <dl className="stats">

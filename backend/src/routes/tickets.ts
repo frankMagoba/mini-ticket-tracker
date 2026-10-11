@@ -27,7 +27,7 @@ export function createTicketsRouter(db: Pool): Router {
     }
   });
 
-  // Register /stats before /:id so "stats" is not treated as an id.
+  // before /:id, or "stats" is parsed as an id
   router.get("/stats", async (_req, res, next) => {
     try {
       const stats = await getTicketStats(db);

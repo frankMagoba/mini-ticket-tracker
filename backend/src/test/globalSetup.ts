@@ -7,8 +7,7 @@ import {
   databaseNameOf,
 } from "./database.js";
 
-// Tests truncate tables, so they get their own database rather than
-// sharing the one the dev server uses.
+// own DB — tests TRUNCATE between cases
 export default async function setup(): Promise<void> {
   const testDbName = databaseNameOf(TEST_DATABASE_URL);
   const admin = createPool(ADMIN_DATABASE_URL);

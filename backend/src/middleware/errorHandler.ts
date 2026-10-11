@@ -18,7 +18,7 @@ interface BodyParserError {
   message: string;
 }
 
-// body-parser rejects bad payloads with http-errors (expose: true, 4xx).
+// express.json() 4xx errors set expose: true
 function asBodyParserError(err: unknown): BodyParserError | null {
   if (typeof err !== "object" || err === null) {
     return null;
